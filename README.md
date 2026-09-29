@@ -1,93 +1,43 @@
-# LABORATORIO 2 — Pronóstico de caudal con ASDA
+# Pronóstico de caudal a 48 horas: adaptación de ASDA
 
-Implementación académica adaptada del enfoque ASDA para pronosticar las siguientes **48 horas de caudal específico** a partir de **336 horas históricas** y 11 variables meteorológicas.
+En este experimento, una LSTM base obtuvo menor error de validación que la adaptación de ASDA. **¿Por qué una arquitectura más compleja no mejoró el pronóstico de caudal para las siguientes 48 horas?** Este trabajo compara ambos enfoques con datos de varias cuencas y analiza tanto el desempeño promedio como la respuesta ante eventos extremos.
 
-## Estructura del proyecto
+## Objetivo y fundamento
 
-```text
-LAB2_ASDA_ENTREGA_FINAL/
-├── src/
-│   ├── asda.py                     # Adaptive SSA, BQA, modelos, TSA y RSD Loss
-│   ├── soporte.py                  # Cache, datasets, entrenamiento, métricas e inferencia
-│   └── leer_datos.py               # Lectura bajo demanda de los HDF5
-├── notebooks/
-│   └── Lab2.ipynb                  # Paper, configuración, experimentos y análisis
-├── data/                           # Metadata versionada; datasets locales ignorados
-│   ├── metadata.json
-│   ├── train.h5
-│   ├── test.h5
-│   └── test_targets.csv
-├── artifacts/                      # Caché y checkpoints generados; ignorados por Git
-│   ├── cache/
-│   └── checkpoints/
-├── outputs/
-│   └── predicciones_lab2_ASDA_FINAL.csv
-└── README.md
-```
+El objetivo fue pronosticar el caudal específico de las próximas **48 horas** usando **336 horas de historia**, 11 variables meteorológicas y el historial de caudal.
 
-El notebook es el punto central del laboratorio. Mantiene visibles las decisiones metodológicas, las adaptaciones respecto al paper, los parámetros del experimento, las validaciones y los resultados. Los módulos `.py` encapsulan únicamente implementación repetitiva o detalle algorítmico que no necesita ocupar el flujo principal del notebook.
+El punto de partida es el método ASDA de Tian et al., propuesto para pronóstico urbano de lluvia y escorrentía con datos cada 10 minutos y horizontes de hasta seis pasos. El artículo combina descomposición adaptativa de la serie, mecanismos de atención y redes recurrentes. En este proyecto adaptamos esas ideas a datos horarios y a un horizonte de 48 horas; por ello, los resultados no son una reproducción directa de los reportados en el paper.
 
-## Diseño experimental
+**Referencia:** Tian et al., [Urban real-time rainfall-runoff prediction using adaptive SSA-decomposition with dual attention](https://doi.org/10.1016/j.jhydrol.2025.132701), *Journal of Hydrology* (2025).
 
-- **E1 — Baseline LSTM:** `X [336,12] → LSTM → Linear(48)`.
-- **E2 — ASDA:** `Adaptive SSA → BQA → Dual LSTM → TSA → RSD Loss`.
-- **E3 — Ablación sin Dual Attention:** conserva SSA, Dual LSTM y RSD Loss; elimina BQA y TSA.
+## Enfoque
 
-La selección final del modelo se realiza exclusivamente con **validation** y utilizando **RMSE** como criterio principal para early stopping.
+Se compararon tres modelos, usando el mismo conjunto de datos:
 
-## Datos requeridos
+- **E1 — LSTM base:** referencia sin descomposición ni atención.
+- **E2 — ASDA adaptado:** Adaptive SSA, atención BQA, dos ramas LSTM, TSA y RSD Loss.
+- **E3 — Ablación:** variante sin los módulos de atención BQA y TSA.
 
-Ubicar en `data/` los archivos entregados para el laboratorio:
+La SSA se aplicó únicamente al caudal histórico de cada muestra, sin usar las 48 horas futuras. Se calcularon las estadísticas de normalización con train, se seleccionó el modelo por RMSE de validation y se evaluó una sola vez sobre test.
 
-```text
-metadata.json
-train.h5
-test.h5
-test_targets.csv
-```
+## Resultados
 
-El lector HDF5 trabaja bajo demanda y utiliza `split=0` para train y `split=1` para validation cuando el dataset contiene la columna `split`.
-`test_targets.csv` también se guarda en `data/` y se utiliza únicamente en la evaluación final de test.
+El conjunto completo incluyó 254,000 muestras de train, 18,142 de validation y 27,983 de test. En validation, E1 obtuvo el menor RMSE:
 
-## Flujo de ejecución
+| Modelo | RMSE validation (mm/h) | MAE validation (mm/h) |
+|---|---:|---:|
+| E1 — LSTM base | **0.10373** | **0.02548** |
+| E2 — ASDA adaptado | 0.13549 | 0.04234 |
+| E3 — Sin atención | 0.11498 | 0.02859 |
 
-```text
-Carga de datos
-    ↓
-Normalización calculada solo con train
-    ↓
-Adaptive SSA sobre las 336 horas históricas
-    ↓
-Precálculo SSA + BQA sin utilizar el target futuro
-    ↓
-E1 / E2 / E3
-    ↓
-Early stopping por RMSE de validation
-    ↓
-RMSE / MAE / NSE / KGE / PBIAS
-    ↓
-Análisis por horizonte de 48 horas
-    ↓
-Selección del modelo
-    ↓
-Predicción de test
-```
+Por ese criterio se seleccionó E1. En test obtuvo **RMSE 0.10226**, **MAE 0.02699**, **NSE 0.62624** y **KGE 0.70264**. El desempeño agregado fue similar al de validation, pero no reflejó bien los extremos: para la muestra con el mayor pico, el valor real alcanzó **16.27951 mm/h** y el máximo pronosticado fue **0.23015 mm/h**.
 
-## Evidencia de la corrida final
+El PBIAS calculado fue **1651.69 %** en test. En esta implementación es una media de errores porcentuales por observación, sensible a caudales reales cercanos a cero; debe interpretarse con cautela y no compararse directamente con variantes agregadas de la métrica.
 
-La ejecución registrada en el notebook utiliza el dataset completo:
+## Conclusión
 
-- Train: **254,000** muestras.
-- Validation: **18,142** muestras.
-- Test: **27,983** muestras.
-- E1 Baseline LSTM: `RMSE = 0.10373`.
-- E2 ASDA: `RMSE = 0.13549`.
-- E3 ASDA sin atención: `RMSE = 0.11498`.
-- Modelo seleccionado: **E1 Baseline LSTM**.
-- Tiempo total registrado: **4.84 horas**.
+En este conjunto de datos, la adaptación ASDA no superó a la LSTM base en RMSE de validation. Los resultados muestran que incorporar componentes más complejos no garantiza una mejora y que las métricas globales pueden ocultar errores importantes en eventos extremos. La ejecución registrada duró **4.26 horas**, reutilizando los precálculos disponibles.
 
-El notebook conserva la validación de reconstrucción SSA, el control de data leakage, la equivalencia de soft-DTW wavefront, la comparación E1/E2/E3, el análisis de errores, las limitaciones respecto al paper y la trazabilidad de los componentes solicitados en el laboratorio. Las predicciones finales se escriben en `outputs/`; la caché y los checkpoints se generan en `artifacts/`.
+## Reproducción
 
-## Dependencias principales
-
-Python 3.11, PyTorch, NumPy, pandas, matplotlib y h5py.
+El análisis, la configuración y las visualizaciones están en [`notebooks/Lab2.ipynb`](notebooks/Lab2.ipynb). Para reproducirlo se requieren los archivos de datos proporcionados para el laboratorio (`metadata.json`, `train.h5`, `test.h5` y `test_targets.csv`) en `data/`, además de Python 3.11, PyTorch, NumPy, pandas, matplotlib y h5py. Los datos y artefactos generados no se incluyen en el repositorio.
