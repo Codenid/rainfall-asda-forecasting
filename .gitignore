@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+env.bak/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Generated project artifacts
+*.h5
+test_targets.csv
+/artifacts/
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tooling and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local environment files
+.env
+.env.*
+!.env.example
